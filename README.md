@@ -32,6 +32,9 @@ env, whoami, date, uname, neofetch, history, exit
 
 
 ## Usage
+Open https://shuka0158.github.io/OS/
+
+OR:
 
 1. Download `index.html`
 2. Open it in any modern browser

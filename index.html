@@ -1,129 +1,1461 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>DAT OS</title>
+<title>TEMP-OS</title>
+<meta charset="UTF-8">
 <style>
 * { margin:0; padding:0; box-sizing:border-box; font-family:monospace; }
-html,body { width:100%; height:100%; background:black; user-select:none; overflow:hidden;}
-#Screen { background:black; width:1080px; height:720px; position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); overflow:hidden; }
-.window { position:absolute; background:#111; border:2px solid #444; color:white; }
-.titlebar { background:linear-gradient(orange,yellow,orange); height:32px; line-height:32px; padding:0 10px; font-size:18px; position:relative; cursor:move;}
-.closebtn { position:absolute; right:4px; top:4px; width:24px; height:24px; text-align:center; line-height:24px; cursor:pointer; border-radius:50%; background:radial-gradient(rgb(40,0,0),red);}
-.content { padding:10px; overflow:auto; }
-.icon { width:64px; text-align:center; color:white; cursor:pointer; margin:10px; display:inline-block;}
-button { cursor:pointer; }
+html,body { width:100%; height:100%; background:#000; overflow:hidden; user-select:none; }
+#Screen {
+  width:1080px; height:720px; position:fixed;
+  top:0; left:0; transform-origin:top left;
+  overflow:hidden;
+}
+.window {
+  position:absolute; background:#141414; border:1px solid #4a4a4a;
+  color:#e0e0e0; min-width:160px; min-height:80px;
+  box-shadow:0 12px 40px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,140,0,0.05);
+  display:flex; flex-direction:column;
+}
+.titlebar {
+  height:30px; min-height:30px; padding:0 8px;
+  background:linear-gradient(to bottom,#ff9500,#c05500);
+  display:flex; align-items:center; cursor:move; flex-shrink:0;
+  gap:6px; border-bottom:1px solid #333;
+}
+.win-title { flex:1; font-size:13px; font-weight:bold; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; pointer-events:none; }
+.wbtn {
+  width:16px; height:16px; border-radius:50%; border:none;
+  cursor:pointer; font-size:9px; display:flex; align-items:center; justify-content:center;
+  font-weight:bold; color:rgba(0,0,0,0.7); flex-shrink:0; line-height:1;
+}
+.wbtn.wclose  { background:radial-gradient(circle,#ff5f57,#bf2c2c); }
+.wbtn.wmin    { background:radial-gradient(circle,#febc2e,#bf7f00); }
+.wbtn.wmax    { background:radial-gradient(circle,#28c840,#0a7a1e); }
+.wbtn:hover   { filter:brightness(1.25); }
+.wcontent { flex:1; overflow:auto; min-height:0; }
+::-webkit-scrollbar { width:5px; height:5px; }
+::-webkit-scrollbar-track { background:#111; }
+::-webkit-scrollbar-thumb { background:#444; border-radius:3px; }
+::-webkit-scrollbar-thumb:hover { background:#666; }
+.icon { position:absolute; width:76px; text-align:center; cursor:pointer; padding:6px 4px; border-radius:6px; }
+.icon:hover { background:rgba(255,140,0,0.18); }
+.icon:active { background:rgba(255,140,0,0.35); }
+.icon-emoji { font-size:30px; display:block; }
+.icon-label { font-size:11px; color:#ddd; margin-top:4px; text-shadow:0 1px 3px #000; line-height:1.3; }
+button { cursor:pointer; background:#2a2a2a; color:#e0e0e0; border:1px solid #444; padding:4px 10px; font-family:monospace; font-size:12px; }
+button:hover { background:#3a3a3a; border-color:#666; }
+input,textarea,select { background:#1c1c1c; color:#e0e0e0; border:1px solid #444; font-family:monospace; font-size:13px; padding:4px 6px; }
+input:focus,textarea:focus,select:focus { outline:none; border-color:#ff8c00; box-shadow:0 0 0 1px rgba(255,140,0,0.3); }
 </style>
 </head>
 <body>
 <div id="Screen"></div>
 <script>
-// ----------------------
-// Safety & Initialization
-// ----------------------
-window.onerror = function(msg,url,line,col,error){ alert("JS Error: "+msg+"\nLine:"+line+" Col:"+col); return false; };
+// ============================================================
+//  TEMP-OS — Core System
+// ============================================================
 
-window.onload = function(){
-    if(localStorage.getItem("LoginInfoShown")===null) localStorage.setItem("LoginInfoShown","false");
-    if(!localStorage.getItem("Username")) localStorage.setItem("Username","Admin");
-    if(!localStorage.getItem("Password")) localStorage.setItem("Password","Admin");
+const LS = {
+  get: k => localStorage.getItem("dat_"+k),
+  set: (k,v) => localStorage.setItem("dat_"+k, v),
+  del: k => localStorage.removeItem("dat_"+k),
+};
 
-    if(localStorage.getItem("LoginInfoShown")=="false") LoginInfo(); else Login();
+function resizeOS() {
+  let s = document.getElementById("Screen");
+  if (s) s.style.transform = `scale(${window.innerWidth/1080},${window.innerHeight/720})`;
+}
+window.addEventListener("resize", resizeOS);
+resizeOS();
+
+let zTop = 100;
+let openWins = {};   // id -> { el, tbBtn, minimized, onClose }
+
+// ────────────────────────────────────────────────────────────
+//  Boot
+// ────────────────────────────────────────────────────────────
+window.onload = function() {
+  buildDesktop();
+};
+
+// ────────────────────────────────────────────────────────────
+//  Window Manager
+// ────────────────────────────────────────────────────────────
+function createWindow(id, title, w, h, buildFn, onClose) {
+  if (openWins[id]) { focusWin(id); return; }
+
+  let S = document.getElementById("Screen");
+  let offset = Object.keys(openWins).length * 24;
+  let wx = Math.min(Math.max(20, (1080-w)/2 + offset), 1080-w-20);
+  let wy = Math.min(Math.max(20, (680-h)/2 + offset), 640-h);
+
+  let win = document.createElement("div");
+  win.className = "window";
+  win.id = id;
+  win.style.cssText = `width:${w}px;height:${h}px;left:${wx}px;top:${wy}px;z-index:${++zTop};`;
+  S.appendChild(win);
+
+  // Titlebar
+  let tb = document.createElement("div");
+  tb.className = "titlebar";
+  tb.innerHTML = `
+    <button class="wbtn wclose" title="Close">✕</button>
+    <button class="wbtn wmin"   title="Minimize">─</button>
+    <button class="wbtn wmax"   title="Maximize">□</button>
+    <span class="win-title">${title}</span>`;
+  win.appendChild(tb);
+
+  // Content
+  let content = document.createElement("div");
+  content.className = "wcontent";
+  win.appendChild(content);
+
+  // Buttons
+  tb.querySelector(".wclose").onclick = () => closeWin(id);
+  tb.querySelector(".wmin").onclick   = () => minWin(id);
+  let maximized = false, prevStyle = {};
+  tb.querySelector(".wmax").onclick   = () => {
+    if (!maximized) {
+      prevStyle = { left:win.style.left, top:win.style.top, width:win.style.width, height:win.style.height };
+      win.style.cssText += ";left:0;top:0;width:1080px;height:680px;";
+      maximized = true;
+    } else {
+      Object.assign(win.style, prevStyle);
+      maximized = false;
+    }
+  };
+
+  // Drag
+  let dragging=false, ox=0, oy=0;
+  tb.addEventListener("mousedown", e => {
+    if (e.target.classList.contains("wbtn")) return;
+    dragging=true; focusWin(id);
+    let r = win.getBoundingClientRect();
+    ox = e.clientX - r.left; oy = e.clientY - r.top;
+    e.preventDefault();
+  });
+  document.addEventListener("mousemove", e => {
+    if (!dragging) return;
+    let sr = document.getElementById("Screen").getBoundingClientRect();
+    let nx = Math.max(0, Math.min(e.clientX - sr.left - ox, 1080 - win.offsetWidth));
+    let ny = Math.max(0, Math.min(e.clientY - sr.top  - oy, 680 - 30));
+    win.style.left = nx+"px"; win.style.top = ny+"px";
+  });
+  document.addEventListener("mouseup", () => { dragging=false; });
+
+  win.addEventListener("mousedown", () => focusWin(id));
+
+  // Taskbar btn
+  let tbBtn = document.createElement("div");
+  tbBtn.style.cssText = "padding:0 12px;height:40px;line-height:40px;background:rgba(255,140,0,0.15);border:1px solid #444;color:#ddd;font-size:12px;cursor:pointer;max-width:130px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;flex-shrink:0;";
+  tbBtn.title = title; tbBtn.innerText = title;
+  tbBtn.onclick = () => { if (openWins[id]?.minimized) restoreWin(id); else minWin(id); };
+  document.getElementById("TaskbarItems")?.appendChild(tbBtn);
+
+  openWins[id] = { el:win, tbBtn, minimized:false, onClose };
+
+  buildFn(content);
+  return content;
 }
 
-// ----------------------
-// Login
-// ----------------------
-function LoginInfo(){
-    let Screen=document.getElementById("Screen");
-    let box=document.createElement("div");
-    box.className="window"; box.style.width="500px"; box.style.height="400px";
-    box.style.top="50%"; box.style.left="50%"; box.style.transform="translate(-50%,-50%)";
-    box.style.background="orange"; box.id="LoginWindow";
-    Screen.appendChild(box);
-    box.innerHTML=`<div style="font-size:40px;text-align:center;margin-top:25px">User name: Admin</div>
-    <div style="font-size:40px;text-align:center;">Password: Admin</div>
-    <div id="okbtn" style="position:absolute;bottom:25px;left:50%;transform:translateX(-50%);
-    width:200px;height:50px;line-height:50px;font-size:34px;text-align:center;background:red;cursor:pointer;">OK</div>`;
-    document.getElementById("okbtn").onclick=Login;
-    localStorage.setItem("LoginInfoShown","true");
+function focusWin(id) {
+  if (!openWins[id]) return;
+  openWins[id].el.style.zIndex = ++zTop;
+  if (openWins[id].minimized) restoreWin(id);
 }
 
-function Login(){
-    if(document.getElementById("LoginWindow")) document.getElementById("LoginWindow").remove();
-    let Screen=document.getElementById("Screen");
-    let box=document.createElement("div");
-    box.className="window"; box.style.width="500px"; box.style.height="400px";
-    box.style.top="50%"; box.style.left="50%"; box.style.transform="translate(-50%,-50%)";
-    box.style.background="orange"; box.id="LoginWindow";
-    Screen.appendChild(box);
-    box.innerHTML=`<div style="font-size:40px;margin:25px;">User name:</div>
-    <div style="font-size:40px;margin:10px 25px;">Password:</div>
-    <input id="LoginWindowInputOne" style="position:absolute;top:25px;left:275px;width:200px;height:55px;font-size:40px;background:#222;color:white;">
-    <input id="LoginWindowInputTwo" type="password" style="position:absolute;top:90px;left:275px;width:200px;height:55px;font-size:40px;background:#222;color:white;">
-    <div id="okbtn2" style="position:absolute;bottom:25px;left:50%;transform:translateX(-50%);
-    width:200px;height:50px;line-height:50px;font-size:34px;text-align:center;background:red;cursor:pointer;">OK</div>`;
-    document.getElementById("okbtn2").onclick=SubmitLogin;
+function closeWin(id) {
+  if (!openWins[id]) return;
+  openWins[id].onClose?.();
+  openWins[id].el.remove();
+  openWins[id].tbBtn?.remove();
+  delete openWins[id];
 }
 
-function SubmitLogin(){
-    let u=document.getElementById("LoginWindowInputOne").value;
-    let p=document.getElementById("LoginWindowInputTwo").value;
-    let su=localStorage.getItem("Username")||"Admin";
-    let sp=localStorage.getItem("Password")||"Admin";
-    if(u===su && p===sp){ document.getElementById("LoginWindow").remove(); Desktop(); }
-    else{ WrongLogin(); }
+function minWin(id) {
+  if (!openWins[id]) return;
+  openWins[id].el.style.display = "none";
+  openWins[id].minimized = true;
+  openWins[id].tbBtn.style.opacity = "0.45";
 }
 
-function WrongLogin(){
-    let Screen=document.getElementById("Screen");
-    if(document.getElementById("LoginWindowWarning")) return;
-    let box=document.createElement("div");
-    box.className="window"; box.style.width="500px"; box.style.height="200px";
-    box.style.top="50%"; box.style.left="50%"; box.style.transform="translate(-50%,-50%)";
-    box.style.background="red"; box.id="LoginWindowWarning";
-    Screen.appendChild(box);
-    box.innerHTML=`<div style="font-size:30px;text-align:center;margin-top:40px">Wrong user name or password.</div>
-    <div id="warnok" style="position:absolute;bottom:20px;left:50%;transform:translateX(-50%);
-    width:200px;height:50px;line-height:50px;font-size:30px;text-align:center;background:orange;cursor:pointer;">OK</div>`;
-    document.getElementById("warnok").onclick=function(){box.remove()};
+function restoreWin(id) {
+  if (!openWins[id]) return;
+  openWins[id].el.style.display = "";
+  openWins[id].minimized = false;
+  openWins[id].tbBtn.style.opacity = "1";
+  focusWin(id);
 }
 
-// ----------------------
-// Desktop & Apps
-// ----------------------
-function Desktop(){
-    let Screen=document.getElementById("Screen");
-    let desk=document.createElement("div"); desk.id="Desktop"; desk.style.width="1080px"; desk.style.height="680px"; desk.style.background="#111"; Screen.appendChild(desk);
+// ────────────────────────────────────────────────────────────
+//  Login
+// ────────────────────────────────────────────────────────────
 
-    // Taskbar
-    let task=document.createElement("div"); task.style.position="absolute"; task.style.bottom="0"; task.style.width="1080px"; task.style.height="40px"; task.style.background="linear-gradient(black,#222,black)";
-    desk.appendChild(task);
+// ────────────────────────────────────────────────────────────
+//  Desktop
+// ────────────────────────────────────────────────────────────
+let APPS = [
+  { name:"Text Editor",   icon:"📝", fn:()=>appTextEditor() },
+  { name:"Terminal",      icon:"💻", fn:()=>appTerminal() },
+  { name:"File Explorer", icon:"📁", fn:()=>appFileExplorer() },
+  { name:"Drawing App",   icon:"🎨", fn:()=>appDrawing() },
+  { name:"Game Center",   icon:"🎮", fn:()=>appGameCenter() },
+  { name:"To-Do List",    icon:"✅", fn:()=>appTodo() },
+  { name:"Alarm Clock",   icon:"⏰", fn:()=>appAlarm() },
+  { name:"Image Viewer",  icon:"🖼️", fn:()=>appImageViewer() },
+  { name:"Browser",       icon:"🌐", fn:()=>appBrowser() },
+  { name:"Settings",      icon:"⚙️", fn:()=>appSettings() },
+];
 
-    let startbtn=document.createElement("div"); startbtn.style.width="40px"; startbtn.style.height="40px";
-    startbtn.style.background="radial-gradient(red,darkred,red)"; startbtn.style.borderRadius="20px"; startbtn.style.cursor="pointer";
-    startbtn.onclick=ShowOrHideStartMenu;
-    task.appendChild(startbtn);
+function buildDesktop() {
+  let S = document.getElementById("Screen");
 
-    let clock=document.createElement("div"); clock.id="DateAndTime"; clock.style.position="absolute"; clock.style.right="0";
-    clock.style.width="110px"; clock.style.height="40px"; clock.style.textAlign="center"; clock.style.background="linear-gradient(red,darkred,red)";
-    clock.style.fontSize="14px"; clock.style.color="white"; task.appendChild(clock);
-    setInterval(UpdateDateAndTime,1000); UpdateDateAndTime();
+  // Wallpaper
+  let desk = document.createElement("div");
+  desk.id = "Desktop";
+  desk.style.cssText = "position:absolute;left:0;top:0;width:1080px;height:680px;overflow:hidden;";
+  desk.style.background = "radial-gradient(ellipse at 30% 40%,#200800 0%,#100400 45%,#050101 100%)";
+  S.appendChild(desk);
 
-    // Start Menu
-    let menu=document.createElement("div"); menu.id="StartMenu"; menu.style.position="absolute"; menu.style.bottom="40px";
-    menu.style.width="300px"; menu.style.height="500px"; menu.style.background="linear-gradient(45deg,red,darkred,red)";
-    menu.style.display="none"; menu.style.color="white"; menu.style.padding="10px"; desk.appendChild(menu);
+  // Grid overlay
+  let gv = document.createElement("canvas");
+  gv.width=1080; gv.height=680;
+  gv.style.cssText="position:absolute;inset:0;opacity:0.04;pointer-events:none;";
+  desk.appendChild(gv);
+  let gc=gv.getContext("2d"); gc.strokeStyle="#ff8c00"; gc.lineWidth=0.5;
+  for(let x=0;x<=1080;x+=48){gc.beginPath();gc.moveTo(x,0);gc.lineTo(x,680);gc.stroke();}
+  for(let y=0;y<=680;y+=48){gc.beginPath();gc.moveTo(0,y);gc.lineTo(1080,y);gc.stroke();}
 
-    // Apps
-    let apps=[["Change Login",OpenChangeLogin],["Game Center",OpenGameCenter],["Text Editor",OpenTextEditor],["Terminal",OpenTerminal],["File Explorer",OpenFileExplorer],["Drawing App",OpenDrawingApp],["To-Do List",OpenTodoList],["Alarm Clock",OpenAlarmClock],["Image Viewer",OpenImageViewer]];
-
-    apps.forEach(([name, fn],i)=>{
-        let ic=document.createElement("div"); ic.className="icon"; ic.innerText=name; ic.onclick=fn;
-        ic.style.position="absolute"; ic.style.top=10 + Math.floor(i/5)*100 + "px"; ic.style.left=10 + (i%5)*150 + "px";
-        desk.appendChild(ic);
-        let d=document.createElement("div"); d.innerText=name; d.style.padding="6px"; d.style.cursor="pointer"; d.onclick=function(){ ShowOrHideStartMenu(); fn(); }; menu.appendChild(d);
+  // Desktop icons (two columns on left)
+  APPS.forEach((app,i) => {
+    let col = Math.floor(i/8), row = i%8;
+    let ic = document.createElement("div");
+    ic.className = "icon";
+    ic.style.left = (14 + col*84)+"px";
+    ic.style.top  = (10 + row*82)+"px";
+    ic.innerHTML  = `<span class="icon-emoji">${app.icon}</span><span class="icon-label">${app.name}</span>`;
+    ic.title = app.name;
+    let clicks=0, clickTimer;
+    ic.addEventListener("click", () => {
+      clicks++;
+      if (clicks===1) clickTimer = setTimeout(()=>clicks=0, 350);
+      if (clicks===2) { clearTimeout(clickTimer); clicks=0; app.fn(); }
     });
+    desk.appendChild(ic);
+  });
+
+  // Taskbar
+  let tb = document.createElement("div");
+  tb.style.cssText = "position:absolute;bottom:0;left:0;width:1080px;height:40px;background:linear-gradient(to bottom,#111,#0c0c0c);border-top:1px solid #2a2a2a;display:flex;align-items:center;z-index:9999;";
+  S.appendChild(tb);
+
+  let startBtn = document.createElement("div");
+  startBtn.style.cssText = "width:54px;height:40px;background:linear-gradient(to bottom,#ff8c00,#c05000);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:10px;font-weight:bold;color:#fff;letter-spacing:0.5px;flex-shrink:0;flex-direction:column;gap:1px;";
+  startBtn.innerHTML = "<span style='font-size:14px;'>▶</span><span>START</span>";
+  startBtn.onclick = toggleStartMenu;
+  tb.appendChild(startBtn);
+
+  let tbDiv = document.createElement("div");
+  tbDiv.style.cssText = "width:1px;height:28px;background:#333;margin:0 4px;flex-shrink:0;";
+  tb.appendChild(tbDiv);
+
+  let tbItems = document.createElement("div");
+  tbItems.id = "TaskbarItems";
+  tbItems.style.cssText = "flex:1;display:flex;gap:3px;overflow:hidden;padding:0 4px;";
+  tb.appendChild(tbItems);
+
+  let clock = document.createElement("div");
+  clock.id = "CLOCK";
+  clock.style.cssText = "width:108px;height:40px;flex-shrink:0;border-left:1px solid #2a2a2a;background:#0d0d0d;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:default;";
+  tb.appendChild(clock);
+  setInterval(tickClock,1000); tickClock();
+
+  // Start menu
+  let sm = document.createElement("div");
+  sm.id = "StartMenu";
+  sm.style.cssText = "position:absolute;bottom:40px;left:0;width:240px;background:linear-gradient(to bottom,#1c0900,#0e0400);border:1px solid #ff8c00;border-bottom:none;display:none;z-index:9998;color:#ddd;";
+  S.appendChild(sm);
+
+  let smHeader = document.createElement("div");
+  smHeader.style.cssText = "padding:16px 14px;background:linear-gradient(to right,#ff8c00,#c05000);font-size:20px;font-weight:bold;color:#fff;letter-spacing:3px;";
+  smHeader.innerText = "TEMP-OS";
+  sm.appendChild(smHeader);
+
+  let smList = document.createElement("div");
+  smList.style.cssText = "padding:6px 0;";
+  sm.appendChild(smList);
+  APPS.forEach(app => {
+    let row = document.createElement("div");
+    row.style.cssText = "padding:9px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:13px;";
+    row.innerHTML = `<span style="font-size:18px;">${app.icon}</span>${app.name}`;
+    row.onmouseenter = ()=>row.style.background="rgba(255,140,0,0.18)";
+    row.onmouseleave = ()=>row.style.background="";
+    row.onclick = () => { hideStartMenu(); app.fn(); };
+    smList.appendChild(row);
+  });
+
+  let smFooter = document.createElement("div");
+  smFooter.style.cssText = "border-top:1px solid #2a2a2a;padding:4px 0;";
+  sm.appendChild(smFooter);
+  let signOut = document.createElement("div");
+  signOut.style.cssText = "padding:9px 16px;cursor:pointer;color:#ff6666;font-size:13px;display:flex;align-items:center;gap:10px;";
+  signOut.innerHTML = "<span style='font-size:16px;'>⏻</span> Sign Out";
+  signOut.onmouseenter = ()=>signOut.style.background="rgba(255,0,0,0.1)";
+  signOut.onmouseleave = ()=>signOut.style.background="";
+  signOut.onclick = doLogout;
+  smFooter.appendChild(signOut);
+
+  // Close start menu on outside click
+  S.addEventListener("mousedown", e => {
+    let sm=document.getElementById("StartMenu");
+    if (sm && sm.style.display!=="none" && !sm.contains(e.target) && !startBtn.contains(e.target))
+      hideStartMenu();
+  });
 }
 
-function ShowOrHideStartMenu(){ let m=document.getElementById("StartMenu"); m.style.display = m.style.display=="none"?"block":"none"; }
-function UpdateDateAndTime(){ let d=new Date(); let h=("0"+d.getHours()).slice(-2); let m=("0"+d.getMinutes()).slice(-2); let s=("0"+d.getSeconds()).slice(-2); let day=("0"+d.getDate()).slice(-2); let mon=("0"+(d.getMonth()+1)).slice(-2); let y=d
+function toggleStartMenu() {
+  let m=document.getElementById("StartMenu");
+  if (!m) return;
+  m.style.display = m.style.display==="none" ? "block" : "none";
+}
+function hideStartMenu() {
+  let m=document.getElementById("StartMenu"); if(m) m.style.display="none";
+}
+
+function tickClock() {
+  let el=document.getElementById("CLOCK"); if(!el) return;
+  let d=new Date();
+  let hh=("0"+d.getHours()).slice(-2), mm=("0"+d.getMinutes()).slice(-2), ss=("0"+d.getSeconds()).slice(-2);
+  let dy=("0"+d.getDate()).slice(-2), mo=("0"+(d.getMonth()+1)).slice(-2), yr=d.getFullYear();
+  el.innerHTML=`<div style="font-size:15px;font-weight:bold;color:#e0e0e0;">${hh}:${mm}:${ss}</div><div style="font-size:10px;color:#666;">${dy}/${mo}/${yr}</div>`;
+}
+
+function doLogout() {
+  location.reload();
+}
+
+// ────────────────────────────────────────────────────────────
+//  APP: Text Editor
+// ────────────────────────────────────────────────────────────
+function appTextEditor() {
+  createWindow("texteditor","📝 Text Editor",640,460, c => {
+    c.style.cssText="padding:0;display:flex;flex-direction:column;";
+    let saved = LS.get("texteditor")||"";
+    c.innerHTML=`
+      <div style="padding:5px 8px;background:#1a1a1a;border-bottom:1px solid #2a2a2a;display:flex;gap:6px;align-items:center;">
+        <button id="te_new">New</button>
+        <button id="te_save">Save</button>
+        <button id="te_load">Load</button>
+        <div style="width:1px;height:20px;background:#333;margin:0 2px;"></div>
+        <select id="te_font" style="font-size:12px;padding:2px;">
+          <option>13px</option><option>15px</option><option>17px</option><option>20px</option>
+        </select>
+        <span id="te_stat" style="margin-left:auto;font-size:11px;color:#666;"></span>
+      </div>
+      <textarea id="te_area" spellcheck="false" style="flex:1;background:#0c0c0c;color:#d4d4d4;border:none;padding:14px;font-size:13px;line-height:1.65;resize:none;outline:none;">${saved.replace(/&/g,"&amp;").replace(/</g,"&lt;")}</textarea>`;
+
+    function stat(msg){ let e=document.getElementById("te_stat"); if(e){e.innerText=msg;setTimeout(()=>{if(e)e.innerText="";},2000);} }
+    document.getElementById("te_new").onclick  = () => { document.getElementById("te_area").value=""; stat("New file"); };
+    document.getElementById("te_save").onclick = () => { LS.set("texteditor",document.getElementById("te_area").value); stat("Saved ✓"); };
+    document.getElementById("te_load").onclick = () => { document.getElementById("te_area").value=LS.get("texteditor")||""; stat("Loaded ✓"); };
+    document.getElementById("te_font").onchange = function(){ document.getElementById("te_area").style.fontSize=this.value; };
+  });
+}
+
+// ────────────────────────────────────────────────────────────
+//  APP: Terminal
+// ────────────────────────────────────────────────────────────
+let tFS = {
+  "/":{t:"d",c:["home","etc","usr"]},
+  "/home":{t:"d",c:["user"]},
+  "/home/user":{t:"d",c:["documents","pictures","desktop"]},
+  "/home/user/documents":{t:"d",c:["readme.txt","notes.txt"]},
+  "/home/user/documents/readme.txt":{t:"f",v:"Welcome to TEMP-OS!\nA browser-based operating system.\n"},
+  "/home/user/documents/notes.txt":{t:"f",v:"Change your password in Settings.\n"},
+  "/home/user/pictures":{t:"d",c:[]},
+  "/home/user/desktop":{t:"d",c:[]},
+  "/etc":{t:"d",c:["os-release"]},
+  "/etc/os-release":{t:"f",v:"NAME=TEMP-OS\nVERSION=1.0\nBUILD=2025.01\n"},
+  "/usr":{t:"d",c:["bin"]},
+  "/usr/bin":{t:"d",c:[]},
+};
+let tCwd = "/home/user";
+let tHist = [], tHIdx = -1;
+
+function appTerminal() {
+  createWindow("terminal","💻 Terminal",660,430, c => {
+    c.style.cssText="padding:0;display:flex;flex-direction:column;background:#080808;";
+    c.innerHTML=`
+      <div id="t_out" style="flex:1;overflow-y:auto;padding:10px;font-size:13px;line-height:1.7;color:#00cc6a;white-space:pre-wrap;word-break:break-all;"></div>
+      <div style="display:flex;align-items:center;padding:4px 8px;border-top:1px solid #1a1a1a;background:#0c0c0c;">
+        <span id="t_prompt" style="color:#ff8c00;font-size:13px;white-space:nowrap;flex-shrink:0;"></span>
+        <input id="t_in" style="flex:1;background:transparent;border:none;color:#00cc6a;font-size:13px;outline:none;padding:2px 6px;" autocomplete="off" spellcheck="false">
+      </div>`;
+    tPrint("TEMP-OS Terminal v1.0\nType 'help' for commands.\n\n");
+    tUpdatePrompt();
+    let inp=document.getElementById("t_in");
+    inp.onkeydown=tKey;
+    inp.focus();
+  });
+}
+
+function tUpdatePrompt() {
+  let el=document.getElementById("t_prompt");
+  if(el) el.innerText=(LS.get("username")||"Admin")+"@DATOS:"+tCwd+"$ ";
+}
+function tPrint(txt) {
+  let el=document.getElementById("t_out"); if(!el) return;
+  el.innerText+=txt; el.scrollTop=el.scrollHeight;
+}
+function tKey(e) {
+  if(e.key==="Enter"){
+    let inp=document.getElementById("t_in"), cmd=inp.value.trim(); inp.value="";
+    tPrint(document.getElementById("t_prompt").innerText+cmd+"\n");
+    if(cmd){tHist.unshift(cmd);tHIdx=-1;}
+    tExec(cmd);
+    tUpdatePrompt();
+  } else if(e.key==="ArrowUp"){
+    if(tHIdx<tHist.length-1) tHIdx++;
+    document.getElementById("t_in").value=tHist[tHIdx]||"";
+    e.preventDefault();
+  } else if(e.key==="ArrowDown"){
+    if(tHIdx>0) tHIdx--; else tHIdx=-1;
+    document.getElementById("t_in").value=tHIdx>=0?tHist[tHIdx]:"";
+    e.preventDefault();
+  } else if(e.key==="Tab"){
+    e.preventDefault();
+    let inp=document.getElementById("t_in"), v=inp.value;
+    let parts=v.split(" "), last=parts[parts.length-1];
+    let node=tFS[tCwd]; if(!node||node.t!=="d") return;
+    let matches=node.c.filter(n=>n.startsWith(last));
+    if(matches.length===1){parts[parts.length-1]=matches[0];inp.value=parts.join(" ");}
+    else if(matches.length>1) tPrint(matches.join("  ")+"\n");
+  }
+}
+function tResolvePath(p) {
+  if(!p||p===".") return tCwd;
+  if(p==="~") return "/home/user";
+  let base = p.startsWith("/") ? [] : tCwd.split("/").filter(Boolean);
+  let segs = p.split("/").filter(Boolean);
+  for(let s of segs){ if(s==="..") base.pop(); else if(s!==".") base.push(s); }
+  return "/"+base.join("/");
+}
+function tExec(line) {
+  if(!line) return;
+  let parts=line.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)||[];
+  let cmd=parts[0], args=parts.slice(1).map(a=>a.replace(/^["']|["']$/g,""));
+  switch(cmd) {
+    case "help":
+      tPrint("Commands: help ls cd pwd cat echo clear mkdir touch rm cp mv env whoami date uname neofetch history exit\n"); break;
+    case "ls": {
+      let path=tResolvePath(args[0]), node=tFS[path];
+      if(!node||node.t!=="d"){tPrint(`ls: ${args[0]||"."}: Not a directory\n`);break;}
+      if(node.c.length===0){tPrint("(empty)\n");break;}
+      tPrint(node.c.map(n=>{let fp=(path==="/"?"":path)+"/"+n; return tFS[fp]?.t==="d"?n+"/":n;}).join("  ")+"\n"); break;
+    }
+    case "cd": {
+      let path=tResolvePath(args[0]||"~"), node=tFS[path];
+      if(!node||node.t!=="d"){tPrint(`cd: ${args[0]}: No such directory\n`);break;}
+      tCwd=path; break;
+    }
+    case "pwd": tPrint(tCwd+"\n"); break;
+    case "cat": {
+      if(!args[0]){tPrint("Usage: cat <file>\n");break;}
+      let path=tResolvePath(args[0]), node=tFS[path];
+      if(!node){tPrint(`cat: ${args[0]}: No such file\n`);break;}
+      if(node.t==="d"){tPrint(`cat: ${args[0]}: Is a directory\n`);break;}
+      tPrint(node.v);break;
+    }
+    case "echo":
+      tPrint(args.join(" ").replace(/\$([\w]+)/g,(_,k)=>({USER:LS.get("username")||"Admin",HOME:"/home/user",SHELL:"/bin/dat",PATH:"/usr/bin"})[k]||"")+"\n"); break;
+    case "clear": { let e=document.getElementById("t_out"); if(e) e.innerText=""; break; }
+    case "mkdir": {
+      if(!args[0]){tPrint("Usage: mkdir <dir>\n");break;}
+      let path=tResolvePath(args[0]);
+      if(tFS[path]){tPrint(`mkdir: ${args[0]}: Already exists\n`);break;}
+      let par=path.substring(0,path.lastIndexOf("/"))||"/", name=path.split("/").pop();
+      if(!tFS[par]||tFS[par].t!=="d"){tPrint("mkdir: cannot create\n");break;}
+      tFS[par].c.push(name); tFS[path]={t:"d",c:[]};break;
+    }
+    case "touch": {
+      if(!args[0]) break;
+      let path=tResolvePath(args[0]);
+      if(!tFS[path]){
+        let par=path.substring(0,path.lastIndexOf("/"))||"/", name=path.split("/").pop();
+        tFS[path]={t:"f",v:""}; if(tFS[par]) tFS[par].c.push(name);
+      } break;
+    }
+    case "rm": {
+      if(!args[0]){tPrint("Usage: rm <file>\n");break;}
+      let path=tResolvePath(args[0]);
+      if(!tFS[path]){tPrint(`rm: ${args[0]}: No such file\n`);break;}
+      let par=path.substring(0,path.lastIndexOf("/"))||"/", name=path.split("/").pop();
+      if(tFS[par]) tFS[par].c=tFS[par].c.filter(n=>n!==name);
+      delete tFS[path]; break;
+    }
+    case "cp": {
+      if(args.length<2){tPrint("Usage: cp <src> <dst>\n");break;}
+      let src=tResolvePath(args[0]), dst=tResolvePath(args[1]);
+      if(!tFS[src]||tFS[src].t!=="f"){tPrint("cp: source not found\n");break;}
+      let par=dst.substring(0,dst.lastIndexOf("/"))||"/", name=dst.split("/").pop();
+      if(!tFS[par]){tPrint("cp: destination dir not found\n");break;}
+      tFS[dst]={t:"f",v:tFS[src].v};
+      if(!tFS[par].c.includes(name)) tFS[par].c.push(name); break;
+    }
+    case "mv": {
+      if(args.length<2){tPrint("Usage: mv <src> <dst>\n");break;}
+      let src=tResolvePath(args[0]), dst=tResolvePath(args[1]);
+      if(!tFS[src]){tPrint("mv: source not found\n");break;}
+      let spar=src.substring(0,src.lastIndexOf("/"))||"/", sname=src.split("/").pop();
+      let dpar=dst.substring(0,dst.lastIndexOf("/"))||"/", dname=dst.split("/").pop();
+      if(!tFS[dpar]){tPrint("mv: destination dir not found\n");break;}
+      tFS[dst]=tFS[src]; delete tFS[src];
+      if(tFS[spar]) tFS[spar].c=tFS[spar].c.filter(n=>n!==sname);
+      if(tFS[dpar]&&!tFS[dpar].c.includes(dname)) tFS[dpar].c.push(dname); break;
+    }
+    case "env":
+      tPrint(`USER=${LS.get("username")||"Admin"}\nHOME=/home/user\nSHELL=/bin/dat\nPATH=/usr/bin\n`); break;
+    case "whoami":
+      tPrint((LS.get("username")||"Admin")+"\n"); break;
+    case "date":
+      tPrint(new Date().toString()+"\n"); break;
+    case "uname":
+      tPrint("DAT-Kernel 1.0.0 #1 SMP dat-x86_64 TEMP-OS\n"); break;
+    case "history":
+      tHist.slice(0,20).forEach((h,i)=>tPrint(`  ${String(i+1).padStart(3)}  ${h}\n`)); break;
+    case "neofetch":
+      tPrint(`
+  ████████╗███████╗███╗   ███╗██████╗      ██████╗ ███████╗
+  ╚══██╔══╝██╔════╝████╗ ████║██╔══██╗    ██╔═══██╗██╔════╝
+     ██║   █████╗  ██╔████╔██║██████╔╝ ── ██║   ██║███████╗
+     ██║   ██╔══╝  ██║╚██╔╝██║██╔═══╝     ██║   ██║╚════██║
+     ██║   ███████╗██║ ╚═╝ ██║██║         ╚██████╔╝███████║
+     ╚═╝   ╚══════╝╚═╝     ╚═╝╚═╝          ╚═════╝ ╚══════╝
+
+  OS: TEMP-OS v1.0
+  User: ${LS.get("username")||"Admin"}
+  Shell: dat-shell 1.0
+  Resolution: 1080×720
+  Kernel: dat-kernel 1.0.0
+  Uptime: ${Math.floor(performance.now()/60000)}m ${Math.floor((performance.now()%60000)/1000)}s
+  GitHub: https://github.com/shuka0158
+
+`); break;
+    case "exit": closeWin("terminal"); break;
+    default: tPrint(`${cmd}: command not found. Type 'help' for commands.\n`);
+  }
+}
+
+// ────────────────────────────────────────────────────────────
+//  APP: File Explorer
+// ────────────────────────────────────────────────────────────
+function appFileExplorer() {
+  createWindow("fileexplorer","📁 File Explorer",640,430, c => {
+    c.style.cssText="padding:0;display:flex;flex-direction:column;";
+    let feCwd="/home/user", feHist=["/home/user"], feHIdx=0;
+
+    c.innerHTML=`
+      <div style="padding:5px 8px;background:#1a1a1a;border-bottom:1px solid #2a2a2a;display:flex;gap:6px;align-items:center;">
+        <button id="fe_back" style="padding:2px 8px;">◀</button>
+        <button id="fe_fwd"  style="padding:2px 8px;">▶</button>
+        <button id="fe_up"   style="padding:2px 8px;">↑</button>
+        <div id="fe_path" style="flex:1;background:#0d0d0d;border:1px solid #2a2a2a;padding:4px 8px;font-size:12px;color:#888;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;"></div>
+      </div>
+      <div style="display:flex;flex:1;overflow:hidden;">
+        <div id="fe_side" style="width:128px;background:#101010;border-right:1px solid #2a2a2a;padding:6px;overflow-y:auto;flex-shrink:0;"></div>
+        <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+          <div id="fe_main" style="flex:1;padding:8px;overflow-y:auto;display:flex;flex-wrap:wrap;align-content:flex-start;gap:2px;"></div>
+          <div id="fe_status" style="padding:4px 10px;background:#101010;border-top:1px solid #2a2a2a;font-size:11px;color:#555;"></div>
+        </div>
+      </div>`;
+
+    let sidebar=[
+      {label:"🏠 Home",path:"/home/user"},
+      {label:"📄 Documents",path:"/home/user/documents"},
+      {label:"🖼️ Pictures",path:"/home/user/pictures"},
+      {label:"🖥️ Desktop",path:"/home/user/desktop"},
+      {label:"⚙️ System",path:"/etc"},
+    ];
+    let side=document.getElementById("fe_side");
+    sidebar.forEach(({label,path})=>{
+      let el=document.createElement("div");
+      el.style.cssText="padding:7px 6px;cursor:pointer;border-radius:3px;font-size:12px;";
+      el.innerText=label;
+      el.onmouseenter=()=>el.style.background="rgba(255,140,0,0.15)";
+      el.onmouseleave=()=>el.style.background="";
+      el.onclick=()=>feNav(path);
+      side.appendChild(el);
+    });
+
+    document.getElementById("fe_back").onclick=()=>{if(feHIdx>0){feHIdx--;feCwd=feHist[feHIdx];feRender();}};
+    document.getElementById("fe_fwd").onclick=()=>{if(feHIdx<feHist.length-1){feHIdx++;feCwd=feHist[feHIdx];feRender();}};
+    document.getElementById("fe_up").onclick=()=>{let p=feCwd.substring(0,feCwd.lastIndexOf("/"))||"/";feNav(p);};
+
+    function feNav(path) {
+      feCwd=path; feHist=feHist.slice(0,feHIdx+1); feHist.push(path); feHIdx=feHist.length-1; feRender();
+    }
+
+    function feRender() {
+      document.getElementById("fe_path").innerText=feCwd;
+      let main=document.getElementById("fe_main"); main.innerHTML="";
+      let node=tFS[feCwd];
+      if(!node||node.t!=="d"){main.innerHTML=`<div style="color:#555;padding:20px;font-size:13px;">Directory not found</div>`;return;}
+      if(node.c.length===0){main.innerHTML=`<div style="color:#555;padding:20px;font-size:13px;">Empty folder</div>`;}
+      node.c.forEach(name=>{
+        let fp=(feCwd==="/"?"":feCwd)+"/"+name, child=tFS[fp], isDir=child?.t==="d";
+        let el=document.createElement("div");
+        el.style.cssText="width:80px;padding:8px 4px;text-align:center;cursor:pointer;border-radius:4px;font-size:11px;color:#ddd;word-break:break-all;";
+        el.innerHTML=`<div style="font-size:28px;">${isDir?"📁":"📄"}</div><div style="margin-top:3px;">${name}</div>`;
+        el.onmouseenter=()=>el.style.background="rgba(255,140,0,0.15)";
+        el.onmouseleave=()=>el.style.background="";
+        el.ondblclick=()=>{
+          if(isDir) feNav(fp);
+          else if(child){
+            createWindow("texteditor_"+name,"📝 "+name,600,450,c2=>{
+              c2.style.cssText="padding:0;display:flex;flex-direction:column;";
+              c2.innerHTML=`<textarea spellcheck="false" style="flex:1;width:100%;background:#0c0c0c;color:#d4d4d4;border:none;padding:14px;font-size:13px;resize:none;outline:none;">${(child.v||"").replace(/&/g,"&amp;").replace(/</g,"&lt;")}</textarea>`;
+            });
+          }
+        };
+        main.appendChild(el);
+      });
+      document.getElementById("fe_status").innerText=`${node.c.length} item(s)  |  ${feCwd}`;
+    }
+    feRender();
+  });
+}
+
+// ────────────────────────────────────────────────────────────
+//  APP: Drawing App
+// ────────────────────────────────────────────────────────────
+function appDrawing() {
+  let drawCtx=null, drawDown=false, drawLX=0, drawLY=0, drawSX=0, drawSY=0;
+  createWindow("drawing","🎨 Drawing App",720,520, c => {
+    c.style.cssText="padding:0;display:flex;flex-direction:column;background:#111;";
+    c.innerHTML=`
+      <div style="padding:5px 10px;background:#1a1a1a;border-bottom:1px solid #2a2a2a;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <select id="da_tool" style="font-size:12px;padding:2px 4px;">
+          <option value="pen">✏️ Pen</option>
+          <option value="eraser">🧹 Eraser</option>
+          <option value="line">📏 Line</option>
+          <option value="rect">▭ Rect</option>
+          <option value="circle">⭕ Circle</option>
+          <option value="fill">🪣 Fill</option>
+        </select>
+        <input type="range" id="da_sz" min="1" max="40" value="5" style="width:70px;">
+        <span id="da_szlbl" style="font-size:11px;color:#aaa;width:28px;">5px</span>
+        <input type="color" id="da_col" value="#ff8c00" style="width:28px;height:24px;padding:0;border:1px solid #444;background:none;cursor:pointer;">
+        <div id="da_pal" style="display:flex;gap:2px;"></div>
+        <div style="margin-left:auto;display:flex;gap:4px;">
+          <button id="da_undo" style="padding:2px 8px;font-size:12px;">↩ Undo</button>
+          <button id="da_clear" style="padding:2px 8px;font-size:12px;">🗑 Clear</button>
+          <button id="da_save" style="padding:2px 8px;font-size:12px;">💾 PNG</button>
+        </div>
+      </div>
+      <canvas id="da_cv" style="flex:1;cursor:crosshair;display:block;background:#fff;"></canvas>`;
+
+    let cv=document.getElementById("da_cv");
+    let toolbar=cv.parentElement.firstElementChild;
+    cv.width=706; cv.height=462;
+    drawCtx=cv.getContext("2d");
+    let snapshots=[];
+
+    function saveSnap(){ snapshots.push(drawCtx.getImageData(0,0,cv.width,cv.height)); if(snapshots.length>30) snapshots.shift(); }
+    document.getElementById("da_undo").onclick=()=>{ if(snapshots.length){ drawCtx.putImageData(snapshots.pop(),0,0); } };
+    document.getElementById("da_clear").onclick=()=>{ saveSnap(); drawCtx.clearRect(0,0,cv.width,cv.height); };
+    document.getElementById("da_save").onclick=()=>{ let a=document.createElement("a"); a.download="drawing.png"; a.href=cv.toDataURL(); a.click(); };
+
+    document.getElementById("da_sz").oninput=function(){ document.getElementById("da_szlbl").innerText=this.value+"px"; };
+
+    let palette=["#000","#fff","#f44","#4f4","#44f","#ff0","#f80","#f0f","#0ff","#888","#400","#040","#004","#840","#048","#804"];
+    let pal=document.getElementById("da_pal");
+    palette.forEach(col=>{
+      let sw=document.createElement("div");
+      sw.style.cssText=`width:18px;height:18px;background:${col};cursor:pointer;border:1px solid #333;flex-shrink:0;`;
+      sw.onclick=()=>document.getElementById("da_col").value=col;
+      pal.appendChild(sw);
+    });
+
+    function getPos(e){ let r=cv.getBoundingClientRect(); return{x:(e.clientX-r.left),y:(e.clientY-r.top)}; }
+    function col(){ return document.getElementById("da_col").value; }
+    function sz(){ return parseInt(document.getElementById("da_sz").value); }
+    function tool(){ return document.getElementById("da_tool").value; }
+
+    cv.onmousedown=e=>{
+      drawDown=true; let{x,y}=getPos(e); drawLX=x;drawLY=y;drawSX=x;drawSY=y;
+      saveSnap();
+      if(tool()==="fill"){ flood(Math.round(x),Math.round(y),hexRgb(col())); drawDown=false; return; }
+      drawCtx.beginPath(); drawCtx.moveTo(x,y);
+      if(tool()==="pen"||tool()==="eraser"){ drawCtx.lineTo(x,y); applyStroke(); }
+    };
+    cv.onmousemove=e=>{
+      if(!drawDown) return;
+      let{x,y}=getPos(e);
+      if(tool()==="pen"||tool()==="eraser"){
+        drawCtx.globalCompositeOperation=tool()==="eraser"?"destination-out":"source-over";
+        drawCtx.strokeStyle=col(); drawCtx.lineWidth=sz(); drawCtx.lineCap="round"; drawCtx.lineJoin="round";
+        drawCtx.beginPath(); drawCtx.moveTo(drawLX,drawLY); drawCtx.lineTo(x,y); drawCtx.stroke();
+        drawCtx.globalCompositeOperation="source-over";
+      }
+      drawLX=x; drawLY=y;
+    };
+    cv.onmouseup=e=>{
+      if(!drawDown) return; drawDown=false;
+      let{x,y}=getPos(e); drawCtx.globalCompositeOperation="source-over";
+      drawCtx.strokeStyle=col(); drawCtx.fillStyle=col(); drawCtx.lineWidth=sz(); drawCtx.lineCap="round";
+      if(tool()==="line"){ drawCtx.beginPath(); drawCtx.moveTo(drawSX,drawSY); drawCtx.lineTo(x,y); drawCtx.stroke(); }
+      else if(tool()==="rect"){ drawCtx.strokeRect(drawSX,drawSY,x-drawSX,y-drawSY); }
+      else if(tool()==="circle"){ let r=Math.hypot(x-drawSX,y-drawSY); drawCtx.beginPath(); drawCtx.arc(drawSX,drawSY,r,0,2*Math.PI); drawCtx.stroke(); }
+    };
+    cv.onmouseleave=()=>{ drawDown=false; };
+
+    function applyStroke(){ drawCtx.strokeStyle=col(); drawCtx.lineWidth=sz(); drawCtx.lineCap="round"; drawCtx.stroke(); }
+
+    function hexRgb(h){ return{r:parseInt(h.slice(1,3),16),g:parseInt(h.slice(3,5),16),b:parseInt(h.slice(5,7),16)}; }
+    function flood(x,y,fill){
+      let img=drawCtx.getImageData(0,0,cv.width,cv.height),d=img.data;
+      let i=(y*cv.width+x)*4, tr=d[i],tg=d[i+1],tb=d[i+2],ta=d[i+3];
+      if(tr===fill.r&&tg===fill.g&&tb===fill.b) return;
+      let q=[[x,y]];
+      while(q.length){
+        let[cx,cy]=q.pop();
+        if(cx<0||cy<0||cx>=cv.width||cy>=cv.height) continue;
+        let j=(cy*cv.width+cx)*4;
+        if(d[j]!==tr||d[j+1]!==tg||d[j+2]!==tb||d[j+3]!==ta) continue;
+        d[j]=fill.r;d[j+1]=fill.g;d[j+2]=fill.b;d[j+3]=255;
+        q.push([cx+1,cy],[cx-1,cy],[cx,cy+1],[cx,cy-1]);
+      }
+      drawCtx.putImageData(img,0,0);
+    }
+  },()=>{ drawCtx=null; drawDown=false; });
+}
+
+// ────────────────────────────────────────────────────────────
+//  APP: Game Center
+// ────────────────────────────────────────────────────────────
+function appGameCenter() {
+  createWindow("gamecenter","🎮 Game Center",420,380, c => {
+    c.style.cssText="padding:0;background:#0a0a0a;";
+    c.innerHTML=`
+      <div style="padding:20px 24px;display:flex;flex-direction:column;gap:12px;">
+        <div style="font-size:18px;color:#ff8c00;letter-spacing:3px;margin-bottom:8px;text-align:center;">SELECT A GAME</div>
+        <div class="gc-tile" id="gc_snake">🐍  Snake</div>
+        <div class="gc-tile" id="gc_ttt">⭕  Tic-Tac-Toe</div>
+        <div class="gc-tile" id="gc_mem">🃏  Memory Cards</div>
+        <div class="gc-tile" id="gc_bk">🧱  Breakout</div>
+      </div>
+      <style>
+        .gc-tile{padding:16px 20px;background:#1a1a1a;border:1px solid #333;color:#ddd;cursor:pointer;font-size:16px;border-radius:4px;letter-spacing:1px;}
+        .gc-tile:hover{background:rgba(255,140,0,0.15);border-color:#ff8c00;color:#fff;}
+      </style>`;
+    document.getElementById("gc_snake").onclick=()=>appSnake();
+    document.getElementById("gc_ttt").onclick=()=>appTicTacToe();
+    document.getElementById("gc_mem").onclick=()=>appMemory();
+    document.getElementById("gc_bk").onclick=()=>appBreakout();
+  });
+}
+
+function appSnake() {
+  let sLoop=null, sRunning=false, sSnake, sDir, sFood, sScore;
+  const SZ=18, COLS=22, ROWS=20;
+  createWindow("snake","🐍 Snake",420,420, c => {
+    c.style.cssText="padding:0;background:#000;display:flex;flex-direction:column;";
+    c.innerHTML=`
+      <div style="padding:4px 16px;background:#111;border-bottom:1px solid #222;display:flex;justify-content:space-between;">
+        <span style="font-size:13px;color:#aaa;">Score: <b id="s_score" style="color:#ff8c00;">0</b></span>
+        <span style="font-size:13px;color:#aaa;">Best: <b id="s_best" style="color:#ff4444;">${LS.get("snake_hi")||0}</b></span>
+      </div>
+      <canvas id="s_cv" width="${COLS*SZ}" height="${ROWS*SZ}" style="display:block;background:#0a0a0a;margin:auto;border:1px solid #1a1a1a;"></canvas>
+      <div id="s_msg" style="text-align:center;font-size:13px;color:#ff8c00;padding:6px;">Press any Arrow key to start!</div>`;
+
+    let cv=document.getElementById("s_cv"), ctx=cv.getContext("2d");
+
+    function sStart(){
+      sSnake=[{x:11,y:10},{x:10,y:10},{x:9,y:10}];
+      sDir={x:1,y:0}; sScore=0; sRunning=true;
+      document.getElementById("s_score").innerText=0;
+      document.getElementById("s_msg").innerText="";
+      sPlace();
+      if(sLoop) clearInterval(sLoop);
+      sLoop=setInterval(sTick,120);
+    }
+    function sPlace(){ do{sFood={x:Math.floor(Math.random()*COLS),y:Math.floor(Math.random()*ROWS)};}while(sSnake.some(s=>s.x===sFood.x&&s.y===sFood.y)); }
+    function sTick(){
+      let h={x:sSnake[0].x+sDir.x,y:sSnake[0].y+sDir.y};
+      if(h.x<0||h.x>=COLS||h.y<0||h.y>=ROWS||sSnake.some(s=>s.x===h.x&&s.y===h.y)){
+        clearInterval(sLoop); sRunning=false;
+        let hi=parseInt(LS.get("snake_hi")||0);
+        if(sScore>hi){LS.set("snake_hi",sScore);document.getElementById("s_best").innerText=sScore;}
+        let e=document.getElementById("s_msg"); if(e) e.innerText=`Game Over! Score: ${sScore}  Press ↑ to restart`;
+        return;
+      }
+      sSnake.unshift(h);
+      if(h.x===sFood.x&&h.y===sFood.y){ sScore++; let e=document.getElementById("s_score"); if(e)e.innerText=sScore; sPlace(); } else sSnake.pop();
+      sDraw();
+    }
+    function sDraw(){
+      ctx.fillStyle="#0a0a0a"; ctx.fillRect(0,0,cv.width,cv.height);
+      // food
+      ctx.fillStyle="#ff3333"; ctx.beginPath(); ctx.arc(sFood.x*SZ+SZ/2,sFood.y*SZ+SZ/2,SZ/2-2,0,2*Math.PI); ctx.fill();
+      // snake
+      sSnake.forEach((s,i)=>{
+        ctx.fillStyle=i===0?"#00ff88":`hsl(${140-i*2},90%,${48-Math.min(i,20)}%)`;
+        ctx.fillRect(s.x*SZ+1,s.y*SZ+1,SZ-2,SZ-2);
+      });
+    }
+    sDraw();
+
+    function sKeyDown(e){
+      if(!document.getElementById("s_cv")){document.removeEventListener("keydown",sKeyDown);return;}
+      let map={ArrowUp:{x:0,y:-1},ArrowDown:{x:0,y:1},ArrowLeft:{x:-1,y:0},ArrowRight:{x:1,y:0}};
+      if(!map[e.key]) return;
+      e.preventDefault();
+      if(!sRunning){sStart();return;}
+      let nd=map[e.key];
+      if(nd.x!==-sDir.x||nd.y!==-sDir.y) sDir=nd;
+    }
+    document.addEventListener("keydown",sKeyDown);
+  },()=>{ if(sLoop) clearInterval(sLoop); sRunning=false; });
+}
+
+function appTicTacToe() {
+  createWindow("tictactoe","⭕ Tic-Tac-Toe",320,360, c => {
+    c.style.cssText="padding:0;background:#0a0a0a;";
+    let board=Array(9).fill(null), cur="X", over=false;
+    c.innerHTML=`
+      <div style="padding:12px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:12px;">
+        <div id="ttt_st" style="font-size:15px;color:#ff8c00;">Player X's turn</div>
+        <div id="ttt_b" style="display:grid;grid-template-columns:repeat(3,84px);gap:5px;"></div>
+        <button id="ttt_rst" style="padding:6px 24px;font-size:13px;margin-top:4px;">Reset</button>
+      </div>`;
+    function render(){
+      let b=document.getElementById("ttt_b"); b.innerHTML="";
+      board.forEach((v,i)=>{
+        let cell=document.createElement("div");
+        cell.style.cssText=`width:84px;height:84px;background:#1a1a1a;border:2px solid #2a2a2a;display:flex;align-items:center;justify-content:center;font-size:38px;cursor:pointer;border-radius:4px;color:${v==="X"?"#ff6060":"#6090ff"};`;
+        cell.innerText=v||"";
+        if(!v&&!over){cell.onmouseenter=()=>cell.style.background="#222";cell.onmouseleave=()=>cell.style.background="#1a1a1a";cell.onclick=()=>click(i);}
+        b.appendChild(cell);
+      });
+    }
+    function click(i){
+      if(board[i]||over) return;
+      board[i]=cur;
+      let w=winner();
+      let st=document.getElementById("ttt_st");
+      if(w){over=true; if(st) st.innerText=w==="draw"?"It's a draw! 🤝":`Player ${w} wins! 🎉`; render();return;}
+      cur=cur==="X"?"O":"X";
+      if(st) st.innerText=`Player ${cur}'s turn`;
+      render();
+    }
+    function winner(){
+      let L=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+      for(let[a,b,c]of L) if(board[a]&&board[a]===board[b]&&board[b]===board[c]) return board[a];
+      return board.every(Boolean)?"draw":null;
+    }
+    document.getElementById("ttt_rst").onclick=()=>{board=Array(9).fill(null);cur="X";over=false;let st=document.getElementById("ttt_st");if(st)st.innerText="Player X's turn";render();};
+    render();
+  });
+}
+
+function appMemory() {
+  createWindow("memory","🃏 Memory Cards",500,420, c => {
+    c.style.cssText="padding:0;background:#0a0a0a;display:flex;flex-direction:column;";
+    let emojis=["🍎","🍊","🍋","🍇","🍓","🍒","🥝","🍑","🌟","🎯","🔥","💎"];
+    let cards=[...emojis,...emojis].sort(()=>Math.random()-0.5);
+    let flipped=[],matched=[],moves=0,locked=false;
+    c.innerHTML=`
+      <div style="padding:6px 16px;background:#111;border-bottom:1px solid #222;display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:13px;color:#aaa;">Moves: <b id="mm_m" style="color:#ff8c00;">0</b></span>
+        <span style="font-size:13px;color:#aaa;">Matched: <b id="mm_p" style="color:#44dd88;">0</b>/${emojis.length}</span>
+        <button id="mm_rst" style="padding:3px 10px;font-size:12px;">Restart</button>
+      </div>
+      <div id="mm_b" style="display:grid;grid-template-columns:repeat(6,66px);gap:7px;padding:14px;justify-content:center;"></div>`;
+    function render(){
+      let b=document.getElementById("mm_b"); b.innerHTML="";
+      cards.forEach((em,i)=>{
+        let isUp=flipped.includes(i)||matched.includes(i);
+        let el=document.createElement("div");
+        el.style.cssText=`width:66px;height:66px;background:${isUp?"#222":"#1a1a1a"};border:2px solid ${matched.includes(i)?"#44cc88":isUp?"#ff8c00":"#2a2a2a"};display:flex;align-items:center;justify-content:center;font-size:${isUp?26:22}px;cursor:pointer;border-radius:6px;`;
+        el.innerText=isUp?em:"?";
+        el.style.color=isUp?"white":"#333";
+        if(!isUp&&!locked){
+          el.onclick=()=>flip(i);
+          el.onmouseenter=()=>el.style.background="#252525";
+          el.onmouseleave=()=>el.style.background="#1a1a1a";
+        }
+        b.appendChild(el);
+      });
+    }
+    function flip(i){
+      if(flipped.includes(i)||matched.includes(i)||locked) return;
+      flipped.push(i);
+      if(flipped.length===2){
+        locked=true; moves++;
+        let me=document.getElementById("mm_m"); if(me) me.innerText=moves;
+        if(cards[flipped[0]]===cards[flipped[1]]){
+          matched.push(...flipped); flipped=[];
+          let pe=document.getElementById("mm_p"); if(pe) pe.innerText=matched.length/2;
+          locked=false;
+          if(matched.length===cards.length) setTimeout(()=>{let b=document.getElementById("mm_b");if(b)b.innerHTML=`<div style="grid-column:1/-1;text-align:center;padding:40px;color:#ff8c00;font-size:20px;">You won in ${moves} moves! 🎉</div>`;},100);
+        } else {
+          setTimeout(()=>{flipped=[];locked=false;render();},850);
+        }
+      }
+      render();
+    }
+    document.getElementById("mm_rst").onclick=()=>{cards=[...emojis,...emojis].sort(()=>Math.random()-0.5);flipped=[];matched=[];moves=0;locked=false;let me=document.getElementById("mm_m"),pe=document.getElementById("mm_p");if(me)me.innerText=0;if(pe)pe.innerText=0;render();};
+    render();
+  });
+}
+
+function appBreakout() {
+  let bkRAF=null;
+  createWindow("breakout","🧱 Breakout",430,510, c => {
+    c.style.cssText="padding:0;background:#000;display:flex;flex-direction:column;";
+    c.innerHTML=`
+      <div style="padding:4px 16px;background:#111;border-bottom:1px solid #222;display:flex;justify-content:space-between;">
+        <span style="font-size:13px;color:#aaa;">Score: <b id="bk_sc" style="color:#ff8c00;">0</b></span>
+        <span style="font-size:13px;color:#aaa;">Lives: <b id="bk_lv" style="color:#ff4444;">❤❤❤</b></span>
+      </div>
+      <canvas id="bk_cv" width="420" height="460" style="display:block;background:#000;"></canvas>`;
+    let cv=document.getElementById("bk_cv"),ctx=cv.getContext("2d");
+    const W=420,H=460,PW=76,PH=9,BR=5,BC=10,BW=36,BH=12,BPAD=3;
+    let px,py=430,bx,by,bdx,bdy,score,lives,bricks=[],started=false;
+    let mX=W/2;
+    cv.onmousemove=e=>{let r=cv.getBoundingClientRect();mX=e.clientX-r.left;};
+    cv.onclick=()=>{if(!started) bkStart();};
+
+    function bkStart(){
+      bricks=[];
+      for(let r=0;r<BR;r++) for(let cc=0;cc<BC;cc++) bricks.push({x:cc*(BW+BPAD)+BPAD,y:r*(BH+BPAD)+40,alive:true,col:`hsl(${r*40+20},90%,55%)`});
+      bx=W/2;by=380;bdx=3.5;bdy=-3.5;score=0;lives=3;started=true;
+      document.getElementById("bk_sc").innerText=0;
+      document.getElementById("bk_lv").innerText="❤❤❤";
+      if(bkRAF) cancelAnimationFrame(bkRAF);
+      bkFrame();
+    }
+
+    function bkFrame(){
+      if(!document.getElementById("bk_cv")){bkRAF=null;return;}
+      ctx.clearRect(0,0,W,H);
+      px=Math.max(0,Math.min(mX-PW/2,W-PW));
+      // bricks
+      bricks.filter(b=>b.alive).forEach(b=>{ctx.fillStyle=b.col;ctx.fillRect(b.x,b.y,BW,BH);});
+      // paddle
+      ctx.fillStyle="#ff8c00";ctx.fillRect(px,py,PW,PH);
+      // ball
+      ctx.beginPath();ctx.arc(bx,by,7,0,2*Math.PI);ctx.fillStyle="#fff";ctx.fill();
+      // move
+      bx+=bdx;by+=bdy;
+      if(bx<=7||bx>=W-7) bdx=-bdx;
+      if(by<=7) bdy=-bdy;
+      // paddle hit
+      if(by>=py-7&&by<=py+PH&&bx>=px&&bx<=px+PW&&bdy>0){
+        bdy=-Math.abs(bdy);bdx=((bx-(px+PW/2))/(PW/2))*5;
+      }
+      // brick hit
+      bricks.forEach(b=>{
+        if(!b.alive) return;
+        if(bx>b.x-7&&bx<b.x+BW+7&&by>b.y-7&&by<b.y+BH+7){
+          b.alive=false;bdy=-bdy;score+=10;
+          let e=document.getElementById("bk_sc");if(e)e.innerText=score;
+        }
+      });
+      // lost ball
+      if(by>H+10){
+        lives--;
+        let lv=document.getElementById("bk_lv");
+        if(lv) lv.innerText=["","❤","❤❤","❤❤❤"][lives]||"";
+        if(lives<=0){
+          ctx.fillStyle="rgba(0,0,0,0.75)";ctx.fillRect(0,0,W,H);
+          ctx.fillStyle="#ff8c00";ctx.font="bold 30px monospace";ctx.textAlign="center";ctx.fillText("GAME OVER",W/2,H/2-20);
+          ctx.fillStyle="#888";ctx.font="16px monospace";ctx.fillText("Score: "+score,W/2,H/2+20);
+          ctx.fillText("Click to restart",W/2,H/2+50); started=false;return;
+        }
+        bx=W/2;by=380;bdx=3.5;bdy=-3.5;
+      }
+      if(bricks.every(b=>!b.alive)){
+        ctx.fillStyle="rgba(0,0,0,0.75)";ctx.fillRect(0,0,W,H);
+        ctx.fillStyle="#44dd88";ctx.font="bold 28px monospace";ctx.textAlign="center";ctx.fillText("YOU WIN! 🎉",W/2,H/2-20);
+        ctx.fillStyle="#888";ctx.font="16px monospace";ctx.fillText("Score: "+score,W/2,H/2+20);
+        ctx.fillText("Click to restart",W/2,H/2+50); started=false;return;
+      }
+      bkRAF=requestAnimationFrame(bkFrame);
+    }
+
+    ctx.fillStyle="#444";ctx.font="16px monospace";ctx.textAlign="center";ctx.fillText("Click to start!",W/2,H/2);
+    ctx.fillStyle="#666";ctx.font="13px monospace";ctx.fillText("Move mouse to control paddle",W/2,H/2+30);
+  },()=>{ if(bkRAF) cancelAnimationFrame(bkRAF); bkRAF=null; });
+}
+
+// ────────────────────────────────────────────────────────────
+//  APP: To-Do List
+// ────────────────────────────────────────────────────────────
+function appTodo() {
+  createWindow("todo","✅ To-Do List",380,460, c => {
+    c.style.cssText="padding:0;display:flex;flex-direction:column;";
+    let todos=JSON.parse(LS.get("todos")||"[]");
+    c.innerHTML=`
+      <div style="padding:8px;background:#1a1a1a;border-bottom:1px solid #2a2a2a;display:flex;gap:6px;">
+        <input id="td_in" placeholder="Add a new task…" style="flex:1;padding:7px 10px;font-size:13px;">
+        <button id="td_add" style="padding:7px 16px;background:#ff8c00;border:none;color:#fff;font-size:16px;font-weight:bold;">+</button>
+      </div>
+      <div id="td_filter" style="padding:4px 8px;background:#111;border-bottom:1px solid #2a2a2a;display:flex;gap:4px;">
+        <button id="td_all"  style="padding:3px 10px;font-size:12px;">All</button>
+        <button id="td_pend" style="padding:3px 10px;font-size:12px;">Active</button>
+        <button id="td_done" style="padding:3px 10px;font-size:12px;">Done</button>
+        <button id="td_clr"  style="padding:3px 10px;font-size:12px;margin-left:auto;">Clear done</button>
+      </div>
+      <div id="td_list" style="flex:1;overflow-y:auto;"></div>
+      <div id="td_stat" style="padding:5px 10px;background:#111;border-top:1px solid #2a2a2a;font-size:11px;color:#555;"></div>`;
+
+    let filter="all";
+    function save(){ LS.set("todos",JSON.stringify(todos)); }
+    function render(){
+      let list=document.getElementById("td_list"); list.innerHTML="";
+      let show=todos.filter(t=> filter==="all"||( filter==="done"?t.done:!t.done));
+      if(show.length===0){ list.innerHTML=`<div style="padding:20px;text-align:center;color:#444;font-size:13px;">${filter==="done"?"No completed tasks":"No tasks — add one above"}</div>`; }
+      show.forEach((t,ri)=>{
+        let i=todos.indexOf(t);
+        let row=document.createElement("div");
+        row.style.cssText="display:flex;align-items:center;gap:8px;padding:10px 10px;border-bottom:1px solid #1a1a1a;";
+        row.innerHTML=`
+          <input type="checkbox" ${t.done?"checked":""} style="width:16px;height:16px;cursor:pointer;accent-color:#ff8c00;flex-shrink:0;">
+          <span style="flex:1;font-size:13px;${t.done?"text-decoration:line-through;color:#555;":"color:#ddd;"}">${t.text.replace(/</g,"&lt;")}</span>
+          <span style="color:#555;cursor:pointer;font-size:15px;padding:0 4px;" title="Delete">✕</span>`;
+        row.querySelector("input").onchange=()=>{ todos[i].done=!todos[i].done; save(); render(); };
+        row.querySelector("span:last-child").onclick=()=>{ todos.splice(i,1); save(); render(); };
+        list.appendChild(row);
+      });
+      let done=todos.filter(t=>t.done).length;
+      let st=document.getElementById("td_stat"); if(st) st.innerText=`${done}/${todos.length} completed`;
+    }
+
+    document.getElementById("td_add").onclick=()=>{
+      let inp=document.getElementById("td_in"), txt=inp.value.trim();
+      if(!txt) return;
+      todos.push({text:txt,done:false}); inp.value=""; save(); render();
+    };
+    document.getElementById("td_in").onkeydown=e=>{if(e.key==="Enter")document.getElementById("td_add").click();};
+    document.getElementById("td_all").onclick=()=>{filter="all";render();};
+    document.getElementById("td_pend").onclick=()=>{filter="active";render();};
+    document.getElementById("td_done").onclick=()=>{filter="done";render();};
+    document.getElementById("td_clr").onclick=()=>{todos=todos.filter(t=>!t.done);save();render();};
+    render();
+  });
+}
+
+// ────────────────────────────────────────────────────────────
+//  APP: Alarm Clock
+// ────────────────────────────────────────────────────────────
+function appAlarm() {
+  let acTimer=null, swTimer=null, swElapsed=0, swStart_, swRunning=false;
+  let alarmTime=null, alarmFired=false;
+  createWindow("alarm","⏰ Alarm Clock",380,380, c => {
+    c.style.cssText="padding:0;background:#0a0a0a;display:flex;flex-direction:column;align-items:center;";
+    c.innerHTML=`
+      <div id="ac_clk" style="font-size:56px;color:#ff8c00;font-weight:bold;letter-spacing:4px;text-shadow:0 0 30px rgba(255,140,0,0.5);padding:24px 0 6px;"></div>
+      <div id="ac_dt" style="font-size:13px;color:#555;margin-bottom:18px;"></div>
+      <div style="width:340px;background:#111;border:1px solid #2a2a2a;padding:16px;margin-bottom:14px;">
+        <div style="font-size:12px;color:#666;letter-spacing:1px;margin-bottom:8px;">ALARM</div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="time" id="ac_tin" style="padding:6px 8px;font-size:15px;flex:1;">
+          <button id="ac_set" style="padding:6px 14px;background:#ff8c00;border:none;color:#fff;">Set</button>
+          <button id="ac_clr_btn" style="padding:6px 10px;">Clear</button>
+        </div>
+        <div id="ac_inf" style="margin-top:8px;font-size:12px;color:#555;">No alarm set.</div>
+      </div>
+      <div style="width:340px;background:#111;border:1px solid #2a2a2a;padding:16px;">
+        <div style="font-size:12px;color:#666;letter-spacing:1px;margin-bottom:8px;">STOPWATCH  <span id="sw_disp" style="color:#ddd;font-size:15px;margin-left:8px;">00:00.0</span></div>
+        <div style="display:flex;gap:8px;">
+          <button id="sw_tog" style="padding:6px 20px;">Start</button>
+          <button id="sw_rst_btn" style="padding:6px 14px;">Reset</button>
+        </div>
+      </div>`;
+
+    function acTick(){
+      let d=new Date(),h=("0"+d.getHours()).slice(-2),m=("0"+d.getMinutes()).slice(-2),s=("0"+d.getSeconds()).slice(-2);
+      let ce=document.getElementById("ac_clk"),de=document.getElementById("ac_dt");
+      if(!ce){clearInterval(acTimer);return;}
+      ce.innerText=`${h}:${m}:${s}`;
+      de.innerText=d.toDateString();
+      if(alarmTime&&!alarmFired&&`${h}:${m}`===alarmTime&&s==="00"){ alarmFired=true; alert(`⏰ Alarm! It's ${alarmTime}`); }
+      if(alarmTime&&`${h}:${m}`!==alarmTime) alarmFired=false;
+    }
+    acTimer=setInterval(acTick,500); acTick();
+
+    document.getElementById("ac_set").onclick=()=>{
+      let t=document.getElementById("ac_tin").value; if(!t) return;
+      alarmTime=t; alarmFired=false;
+      let e=document.getElementById("ac_inf"); if(e) e.innerHTML=`Alarm set for <span style="color:#ff8c00;">${t}</span> ⏰`;
+    };
+    document.getElementById("ac_clr_btn").onclick=()=>{
+      alarmTime=null; let e=document.getElementById("ac_inf"); if(e) e.innerText="No alarm set.";
+    };
+
+    function swFrame(){
+      if(!swRunning) return;
+      let e=swElapsed+Date.now()-swStart_;
+      let m=Math.floor(e/60000),s=Math.floor((e%60000)/1000),t=Math.floor((e%1000)/100);
+      let el=document.getElementById("sw_disp"); if(el) el.innerText=`${("0"+m).slice(-2)}:${("0"+s).slice(-2)}.${t}`;
+      swTimer=requestAnimationFrame(swFrame);
+    }
+    document.getElementById("sw_tog").onclick=()=>{
+      let btn=document.getElementById("sw_tog");
+      if(swRunning){ swRunning=false; swElapsed+=Date.now()-swStart_; cancelAnimationFrame(swTimer); if(btn)btn.innerText="Start"; }
+      else{ swRunning=true; swStart_=Date.now(); if(btn)btn.innerText="Stop"; swFrame(); }
+    };
+    document.getElementById("sw_rst_btn").onclick=()=>{
+      swRunning=false; swElapsed=0; cancelAnimationFrame(swTimer);
+      let b=document.getElementById("sw_tog"),d=document.getElementById("sw_disp");
+      if(b)b.innerText="Start"; if(d)d.innerText="00:00.0";
+    };
+  },()=>{ clearInterval(acTimer); cancelAnimationFrame(swTimer); swRunning=false; });
+}
+
+// ────────────────────────────────────────────────────────────
+//  APP: Image Viewer
+// ────────────────────────────────────────────────────────────
+function appImageViewer() {
+  let ivImg=null, ivZoom=1;
+  createWindow("imageviewer","🖼️ Image Viewer",640,480, c => {
+    c.style.cssText="padding:0;display:flex;flex-direction:column;background:#0a0a0a;";
+    c.innerHTML=`
+      <div style="padding:5px 10px;background:#1a1a1a;border-bottom:1px solid #2a2a2a;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+        <button id="iv_url" style="padding:3px 10px;font-size:12px;">🌐 Open URL</button>
+        <label style="padding:3px 10px;font-size:12px;background:#2a2a2a;border:1px solid #444;cursor:pointer;">
+          📂 Open File <input type="file" id="iv_file" accept="image/*" style="display:none;">
+        </label>
+        <div style="width:1px;height:20px;background:#333;margin:0 2px;"></div>
+        <button id="iv_zi"  style="padding:3px 8px;font-size:14px;">+</button>
+        <button id="iv_zo"  style="padding:3px 8px;font-size:14px;">-</button>
+        <button id="iv_fit" style="padding:3px 8px;font-size:12px;">Fit</button>
+        <button id="iv_rot" style="padding:3px 8px;font-size:12px;">⟳</button>
+        <span id="iv_info" style="margin-left:auto;font-size:11px;color:#555;"></span>
+      </div>
+      <div id="iv_stage" style="flex:1;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#111;position:relative;">
+        <div style="text-align:center;color:#333;">
+          <div style="font-size:48px;">🖼️</div>
+          <div style="margin-top:10px;font-size:13px;">Open a file or enter a URL</div>
+        </div>
+      </div>`;
+
+    let ivRot=0;
+    function ivShow(src){
+      let stage=document.getElementById("iv_stage"); if(!stage) return;
+      stage.innerHTML=`<img id="iv_img" src="${src}" style="max-width:100%;max-height:100%;object-fit:contain;transform-origin:center;transition:transform 0.15s;cursor:grab;">`;
+      ivImg=document.getElementById("iv_img"); ivZoom=1; ivRot=0;
+      ivImg.onload=()=>{let e=document.getElementById("iv_info");if(e)e.innerText=`${ivImg.naturalWidth}×${ivImg.naturalHeight}`;};
+      ivImg.onerror=()=>{stage.innerHTML=`<div style="color:#ff4444;font-size:13px;">Failed to load image.</div>`;};
+    }
+    function ivApply(){ if(ivImg) ivImg.style.transform=`scale(${ivZoom}) rotate(${ivRot}deg)`; }
+
+    document.getElementById("iv_url").onclick=()=>{
+      let url=prompt("Enter image URL:"); if(url&&url.trim()) ivShow(url.trim());
+    };
+    document.getElementById("iv_file").onchange=function(){
+      let f=this.files[0]; if(!f) return;
+      let r=new FileReader(); r.onload=e=>ivShow(e.target.result); r.readAsDataURL(f);
+    };
+    document.getElementById("iv_zi").onclick=()=>{ivZoom=Math.min(ivZoom*1.25,8);ivApply();};
+    document.getElementById("iv_zo").onclick=()=>{ivZoom=Math.max(ivZoom/1.25,0.1);ivApply();};
+    document.getElementById("iv_fit").onclick=()=>{ivZoom=1;ivRot=0;ivApply();};
+    document.getElementById("iv_rot").onclick=()=>{ivRot=(ivRot+90)%360;ivApply();};
+  },()=>{ ivImg=null; });
+}
+
+// ────────────────────────────────────────────────────────────
+//  APP: Browser
+// ────────────────────────────────────────────────────────────
+function appBrowser() {
+  // Sites known to send X-Frame-Options: DENY/SAMEORIGIN
+  const BLOCKED_DOMAINS = [
+    "google.com","youtube.com","twitter.com","x.com","facebook.com",
+    "instagram.com","github.com","linkedin.com","amazon.com","netflix.com",
+    "twitch.tv","tiktok.com","discord.com","microsoft.com","apple.com",
+    "stackoverflow.com","reddit.com","old.reddit.com",
+  ];
+
+  const BOOKMARKS = [
+    { label:"🔍 Search",    url:"search" },
+    { label:"My GitHub",    url:"https://github.com/shuka0158" },
+    { label:"Wikipedia",    url:"https://en.m.wikipedia.org/wiki/Main_Page" },
+    { label:"Hacker News",  url:"https://news.ycombinator.com" },
+    { label:"Archive.org",  url:"https://archive.org" },
+    { label:"OpenStreetMap",url:"https://www.openstreetmap.org" },
+  ];
+
+  createWindow("browser","🌐 Browser",820,560, c => {
+    c.style.cssText="padding:0;display:flex;flex-direction:column;background:#0e0e0e;";
+
+    c.innerHTML=`
+      <div style="padding:5px 8px;background:#1a1a1a;border-bottom:1px solid #2a2a2a;display:flex;gap:6px;align-items:center;">
+        <button id="br_back"   style="padding:3px 9px;font-size:14px;" title="Back">◀</button>
+        <button id="br_fwd"    style="padding:3px 9px;font-size:14px;" title="Forward">▶</button>
+        <button id="br_reload" style="padding:3px 9px;font-size:14px;" title="Reload">↻</button>
+        <button id="br_home_btn" style="padding:3px 9px;font-size:14px;" title="Home">🏠</button>
+        <input  id="br_url" style="flex:1;padding:5px 10px;font-size:13px;border-radius:3px;" placeholder="Search or enter URL…">
+        <button id="br_go" style="padding:5px 16px;background:#ff8c00;border:none;color:#fff;font-weight:bold;font-size:13px;">Go</button>
+        <button id="br_ext" style="padding:5px 9px;font-size:13px;" title="Open in new tab">↗</button>
+      </div>
+      <div id="br_bm" style="padding:3px 8px;background:#141414;border-bottom:1px solid #222;display:flex;gap:2px;overflow-x:auto;flex-shrink:0;align-items:center;"></div>
+      <div id="br_stage" style="flex:1;position:relative;background:#111;display:flex;flex-direction:column;overflow:hidden;">
+
+        <!-- Home screen -->
+        <div id="br_home" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;color:#ddd;padding:20px;">
+          <div style="font-size:30px;color:#ff8c00;font-weight:bold;letter-spacing:4px;">TEMP-OS Browser</div>
+          <div style="display:flex;gap:8px;width:100%;max-width:500px;">
+            <input id="br_hsearch" style="flex:1;padding:9px 14px;font-size:14px;border-radius:3px;" placeholder="Search DuckDuckGo…">
+            <button id="br_hgo" style="padding:9px 18px;background:#ff8c00;border:none;color:#fff;font-size:14px;font-weight:bold;">Search</button>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:4px;">
+            ${BOOKMARKS.filter(b=>b.url!=="search").map(b=>`
+              <div onclick="brNav('${b.url}')" style="padding:10px 18px;background:#1a1a1a;border:1px solid #2a2a2a;cursor:pointer;border-radius:4px;font-size:13px;color:#ccc;" onmouseenter="this.style.borderColor='#ff8c00'" onmouseleave="this.style.borderColor='#2a2a2a'">${b.label}</div>`).join("")}
+          </div>
+        </div>
+
+        <!-- iframe -->
+        <iframe id="br_frame" style="flex:1;border:none;display:none;width:100%;height:100%;" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation-by-user-activation"></iframe>
+
+        <!-- Blocked notice -->
+        <div id="br_blocker" style="display:none;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:30px;text-align:center;">
+          <div style="font-size:48px;">🚫</div>
+          <div style="font-size:18px;color:#ff6666;font-weight:bold;">This site blocks embedding</div>
+          <div id="br_burl" style="font-size:12px;color:#555;word-break:break-all;max-width:500px;"></div>
+          <div style="font-size:13px;color:#666;max-width:440px;line-height:1.7;">
+            <b style="color:#aaa;">Why?</b> Sites like Google, GitHub, YouTube, Reddit and most major platforms set
+            <code style="color:#ff8c00;">X-Frame-Options: DENY</code> to prevent being loaded inside another page.
+            This is a browser security rule that can't be bypassed.
+          </div>
+          <div style="display:flex;gap:10px;margin-top:4px;">
+            <button id="br_ext2" style="padding:8px 22px;font-size:13px;background:#ff8c00;border:none;color:#fff;">Open in New Tab ↗</button>
+            <button id="br_search_instead" style="padding:8px 22px;font-size:13px;">Search it instead</button>
+          </div>
+        </div>
+      </div>
+      <div style="padding:3px 10px;background:#111;border-top:1px solid #1a1a1a;font-size:11px;display:flex;gap:8px;">
+        <span id="br_status" style="color:#555;">Ready</span>
+      </div>`;
+
+    // Bookmarks bar
+    let bmBar = document.getElementById("br_bm");
+    BOOKMARKS.forEach(b => {
+      let btn = document.createElement("div");
+      btn.style.cssText="padding:3px 10px;cursor:pointer;font-size:12px;color:#888;border-radius:3px;white-space:nowrap;flex-shrink:0;";
+      btn.innerText = b.label;
+      btn.onmouseenter=()=>btn.style.background="rgba(255,140,0,0.15)";
+      btn.onmouseleave=()=>btn.style.background="";
+      btn.onclick=()=>{ if(b.url==="search") brShowHome(); else brNav(b.url); };
+      bmBar.appendChild(btn);
+    });
+
+    let currentURL = "";
+
+    function brSetStatus(msg) { let e=document.getElementById("br_status"); if(e) e.innerText=msg; }
+    function brSetTitle(t)    { let e=document.getElementById("browser")?.querySelector(".win-title"); if(e) e.innerText="🌐 "+t; }
+
+    function brShowHome() {
+      document.getElementById("br_home").style.display    = "flex";
+      document.getElementById("br_frame").style.display   = "none";
+      document.getElementById("br_blocker").style.display = "none";
+      document.getElementById("br_frame").src = "about:blank";
+      brSetTitle("New Tab"); brSetStatus("Ready");
+    }
+
+    function brShowBlocker(url) {
+      document.getElementById("br_home").style.display    = "none";
+      document.getElementById("br_frame").style.display   = "none";
+      document.getElementById("br_blocker").style.display = "flex";
+      document.getElementById("br_frame").src = "about:blank";
+      let e = document.getElementById("br_burl"); if(e) e.innerText = url;
+      brSetStatus("Blocked: "+url);
+      brSetTitle(url);
+    }
+
+    function brResolveURL(raw) {
+      raw = raw.trim();
+      if (!raw) return null;
+
+      // YouTube watch → embed
+      let yt = raw.match(/(?:https?:\/\/)?(?:www\.)?youtube\.com\/watch\?.*v=([a-zA-Z0-9_-]+)/);
+      if (yt) return { url:`https://www.youtube.com/embed/${yt[1]}?autoplay=0`, blocked:false };
+
+      // youtu.be short link
+      let yts = raw.match(/(?:https?:\/\/)?youtu\.be\/([a-zA-Z0-9_-]+)/);
+      if (yts) return { url:`https://www.youtube.com/embed/${yts[1]}?autoplay=0`, blocked:false };
+
+      // Plain text with no dots → DuckDuckGo Lite search
+      if (!raw.includes(".") || raw.includes(" ")) {
+        return { url:"https://lite.duckduckgo.com/lite/?q="+encodeURIComponent(raw), blocked:false };
+      }
+
+      // Add protocol
+      if (!/^https?:\/\//i.test(raw)) raw = "https://" + raw;
+
+      // Check known-blocked domains
+      try {
+        let host = new URL(raw).hostname.replace(/^www\./,"");
+        if (BLOCKED_DOMAINS.some(d => host === d || host.endsWith("."+d))) {
+          return { url:raw, blocked:true };
+        }
+      } catch(e) {}
+
+      return { url:raw, blocked:false };
+    }
+
+    window.brNav = function(raw) {
+      if (!raw) return;
+      let resolved = brResolveURL(raw);
+      if (!resolved) return;
+      currentURL = resolved.url;
+
+      let inp = document.getElementById("br_url"); if(inp) inp.value = resolved.url;
+
+      if (resolved.blocked) {
+        brShowBlocker(resolved.url);
+        return;
+      }
+
+      // Load in iframe
+      document.getElementById("br_home").style.display    = "none";
+      document.getElementById("br_blocker").style.display = "none";
+      let frame = document.getElementById("br_frame");
+      frame.style.display = "block";
+      brSetStatus("Loading…"); brSetTitle(resolved.url);
+      frame.src = resolved.url;
+
+      frame.onload = () => {
+        brSetStatus(resolved.url);
+        // Try to detect if the page is truly blank (some sites load a blank page instead of erroring)
+        try {
+          let doc = frame.contentDocument;
+          if (doc && doc.body && doc.body.innerHTML.trim() === "") brShowBlocker(resolved.url);
+        } catch(e) { /* cross-origin = loaded fine */ }
+      };
+      frame.onerror = () => brShowBlocker(resolved.url);
+    };
+
+    // Home search box
+    document.getElementById("br_hgo").onclick = () => {
+      let v = document.getElementById("br_hsearch")?.value?.trim();
+      if (v) { document.getElementById("br_url").value=v; brNav(v); }
+    };
+    document.getElementById("br_hsearch").onkeydown = e => {
+      if (e.key==="Enter") document.getElementById("br_hgo").click();
+    };
+
+    document.getElementById("br_go").onclick = () => { let v=document.getElementById("br_url")?.value?.trim(); if(v) brNav(v); };
+    document.getElementById("br_url").onkeydown = e => { if(e.key==="Enter"){ let v=e.target.value.trim(); if(v) brNav(v); } };
+    document.getElementById("br_back").onclick   = () => { try{document.getElementById("br_frame").contentWindow.history.back();}catch(e){} };
+    document.getElementById("br_fwd").onclick    = () => { try{document.getElementById("br_frame").contentWindow.history.forward();}catch(e){} };
+    document.getElementById("br_reload").onclick = () => { let f=document.getElementById("br_frame"); if(f.src&&f.src!=="about:blank") f.src=f.src; };
+    document.getElementById("br_home_btn").onclick = brShowHome;
+    document.getElementById("br_ext").onclick  = () => { if(currentURL&&currentURL!=="about:blank") window.open(currentURL,"_blank"); };
+    document.getElementById("br_ext2").onclick = () => { if(currentURL) window.open(currentURL,"_blank"); };
+    document.getElementById("br_search_instead").onclick = () => {
+      try { let q=new URL(currentURL).hostname; document.getElementById("br_url").value=q; brNav(q); } catch(e){}
+    };
+
+  }, () => { delete window.brNav; });
+}
+
+// ────────────────────────────────────────────────────────────
+//  APP: Settings
+// ────────────────────────────────────────────────────────────
+function appSettings() {
+  createWindow("settings","⚙️ Settings",440,400, c => {
+    c.style.cssText="padding:0;display:flex;";
+    c.innerHTML=`
+      <div id="st_nav" style="width:130px;background:#0e0e0e;border-right:1px solid #2a2a2a;padding:8px 0;flex-shrink:0;"></div>
+      <div id="st_body" style="flex:1;padding:18px;overflow-y:auto;"></div>`;
+
+    let tabs=[
+      {id:"account", label:"👤 Account"},
+      {id:"display",  label:"🖥️ Display"},
+      {id:"system",   label:"🔧 System"},
+      {id:"about",    label:"ℹ️ About"},
+    ];
+    let nav=document.getElementById("st_nav");
+    tabs.forEach(({id,label})=>{
+      let btn=document.createElement("div");
+      btn.style.cssText="padding:10px 14px;cursor:pointer;font-size:13px;border-left:3px solid transparent;";
+      btn.innerText=label;
+      btn.id="sttab_"+id;
+      btn.onmouseenter=()=>{ if(btn.style.borderColor!=="rgb(255, 140, 0)") btn.style.background="rgba(255,140,0,0.1)"; };
+      btn.onmouseleave=()=>{ if(btn.style.borderColor!=="rgb(255, 140, 0)") btn.style.background=""; };
+      btn.onclick=()=>setTab(id);
+      nav.appendChild(btn);
+    });
+
+    function setTab(id){
+      tabs.forEach(t=>{
+        let b=document.getElementById("sttab_"+t.id);
+        if(b){b.style.borderColor="transparent";b.style.background="";}
+      });
+      let active=document.getElementById("sttab_"+id);
+      if(active){active.style.borderColor="#ff8c00";active.style.background="rgba(255,140,0,0.12)";}
+
+      let body=document.getElementById("st_body"); if(!body) return;
+      if(id==="account"){
+        body.innerHTML=`
+          <div style="font-size:15px;color:#ff8c00;margin-bottom:16px;font-weight:bold;">Account</div>
+          <div style="display:flex;flex-direction:column;gap:12px;">
+            <div>
+              <div style="font-size:11px;color:#666;letter-spacing:1px;margin-bottom:5px;">USERNAME</div>
+              <input id="st_u" style="width:100%;padding:7px;" value="${LS.get("username")||"Admin"}">
+            </div>
+            <div>
+              <div style="font-size:11px;color:#666;letter-spacing:1px;margin-bottom:5px;">NEW PASSWORD</div>
+              <input type="password" id="st_p" style="width:100%;padding:7px;" placeholder="Leave blank to keep current">
+            </div>
+            <div>
+              <div style="font-size:11px;color:#666;letter-spacing:1px;margin-bottom:5px;">CONFIRM PASSWORD</div>
+              <input type="password" id="st_p2" style="width:100%;padding:7px;" placeholder="Confirm new password">
+            </div>
+            <div id="st_msg" style="font-size:12px;min-height:16px;"></div>
+            <button id="st_save" style="padding:9px;background:#ff8c00;border:none;color:#fff;font-size:14px;font-weight:bold;letter-spacing:1px;">SAVE CHANGES</button>
+          </div>`;
+        document.getElementById("st_save").onclick=()=>{
+          let u=document.getElementById("st_u").value.trim();
+          let p=document.getElementById("st_p").value;
+          let p2=document.getElementById("st_p2").value;
+          let msg=document.getElementById("st_msg");
+          if(!u){msg.style.color="#ff4444";msg.innerText="Username cannot be empty.";return;}
+          if(p&&p!==p2){msg.style.color="#ff4444";msg.innerText="Passwords do not match.";return;}
+          LS.set("username",u); if(p) LS.set("password",p);
+          msg.style.color="#44cc88";msg.innerText="Saved successfully ✓";
+          setTimeout(()=>{let e=document.getElementById("st_msg");if(e)e.innerText="";},2500);
+        };
+      } else if(id==="display"){
+        body.innerHTML=`
+          <div style="font-size:15px;color:#ff8c00;margin-bottom:16px;font-weight:bold;">Display</div>
+          <div style="display:flex;flex-direction:column;gap:10px;font-size:13px;">
+            ${[["Resolution","1080×720"],["Color Depth","32-bit"],["Refresh Rate","60 Hz"],["Theme","Dark Orange"],["Font","Monospace"]].map(([k,v])=>`<div style="display:flex;justify-content:space-between;padding:8px;background:#1a1a1a;border:1px solid #2a2a2a;"><span style="color:#888;">${k}</span><span style="color:#ddd;">${v}</span></div>`).join("")}
+          </div>`;
+      } else if(id==="system"){
+        body.innerHTML=`
+          <div style="font-size:15px;color:#ff8c00;margin-bottom:16px;font-weight:bold;">System</div>
+          <div style="display:flex;flex-direction:column;gap:8px;font-size:13px;">
+            ${[["Kernel","dat-kernel 1.0.0"],["Shell","dat-shell 1.0"],["CPU","Virtual x86_64"],["RAM","Browser-managed"],["Storage","localStorage"],["Uptime",`${Math.floor(performance.now()/60000)}m ${Math.floor((performance.now()%60000)/1000)}s`]].map(([k,v])=>`<div style="display:flex;justify-content:space-between;padding:8px;background:#1a1a1a;border:1px solid #2a2a2a;"><span style="color:#888;">${k}</span><span style="color:#ddd;">${v}</span></div>`).join("")}
+            <button onclick="if(confirm('Reset all data and log out?')){localStorage.clear();location.reload();}" style="padding:8px;margin-top:8px;background:#3a0000;border:1px solid #660000;color:#ff6666;font-size:13px;">Reset All Data</button>
+          </div>`;
+      } else if(id==="about"){
+        body.innerHTML=`
+          <div style="font-size:15px;color:#ff8c00;margin-bottom:16px;font-weight:bold;">About TEMP-OS</div>
+          <div style="text-align:center;padding:10px 0;">
+            <div style="font-size:40px;color:#ff8c00;font-weight:bold;letter-spacing:6px;text-shadow:0 0 20px rgba(255,140,0,0.5);">TEMP-OS</div>
+            <div style="color:#555;font-size:12px;margin-top:6px;">Version 1.0.0 — Build 2025.01</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;font-size:13px;margin-top:12px;">
+            ${[["OS","TEMP-OS v1.0"],["User",LS.get("username")||"Admin"],["Build","2025.01"],["Engine","Chromium/Gecko (browser)"],["License","Open Source"]].map(([k,v])=>`<div style="display:flex;justify-content:space-between;padding:8px;background:#1a1a1a;border:1px solid #2a2a2a;"><span style="color:#888;">${k}</span><span style="color:#ddd;">${v}</span></div>`).join("")}
+          </div>`;
+      }
+    }
+    setTab("account");
+  });
+}
+</script>
+</body>
+</html>

@@ -402,7 +402,7 @@ function appTerminal() {
 
 function tUpdatePrompt() {
   let el=document.getElementById("t_prompt");
-  if(el) el.innerText=(LS.get("username")||"Admin")+"@DATOS:"+tCwd+"$ ";
+  if(el) el.innerText=(LS.get("username")||"Admin")+"@TEMP_OS:"+tCwd+"$ ";
 }
 function tPrint(txt) {
   let el=document.getElementById("t_out"); if(!el) return;
@@ -468,7 +468,7 @@ function tExec(line) {
       tPrint(node.v);break;
     }
     case "echo":
-      tPrint(args.join(" ").replace(/\$([\w]+)/g,(_,k)=>({USER:LS.get("username")||"Admin",HOME:"/home/user",SHELL:"/bin/dat",PATH:"/usr/bin"})[k]||"")+"\n"); break;
+      tPrint(args.join(" ").replace(/\$([\w]+)/g,(_,k)=>({USER:LS.get("username")||"Admin",HOME:"/home/user",SHELL:"/bin/temp",PATH:"/usr/bin"})[k]||"")+"\n"); break;
     case "clear": { let e=document.getElementById("t_out"); if(e) e.innerText=""; break; }
     case "mkdir": {
       if(!args[0]){tPrint("Usage: mkdir <dir>\n");break;}
@@ -515,13 +515,13 @@ function tExec(line) {
       if(tFS[dpar]&&!tFS[dpar].c.includes(dname)) tFS[dpar].c.push(dname); break;
     }
     case "env":
-      tPrint(`USER=${LS.get("username")||"Admin"}\nHOME=/home/user\nSHELL=/bin/dat\nPATH=/usr/bin\n`); break;
+      tPrint(`USER=${LS.get("username")||"Admin"}\nHOME=/home/user\nSHELL=/bin/temp\nPATH=/usr/bin\n`); break;
     case "whoami":
       tPrint((LS.get("username")||"Admin")+"\n"); break;
     case "date":
       tPrint(new Date().toString()+"\n"); break;
     case "uname":
-      tPrint("DAT-Kernel 1.0.0 #1 SMP dat-x86_64 TEMP-OS\n"); break;
+      tPrint("TEMP-Kernel 1.0.0 #1 SMP temp-x86_64 TEMP-OS\n"); break;
     case "history":
       tHist.slice(0,20).forEach((h,i)=>tPrint(`  ${String(i+1).padStart(3)}  ${h}\n`)); break;
     case "neofetch":
@@ -535,9 +535,9 @@ function tExec(line) {
 
   OS: TEMP-OS v1.0
   User: ${LS.get("username")||"Admin"}
-  Shell: dat-shell 1.0
+  Shell: temp-shell 1.0
   Resolution: 1080×720
-  Kernel: dat-kernel 1.0.0
+  Kernel: temp-kernel 1.0.0
   Uptime: ${Math.floor(performance.now()/60000)}m ${Math.floor((performance.now()%60000)/1000)}s
   GitHub: https://github.com/shuka0158
 
@@ -1438,7 +1438,7 @@ function appSettings() {
         body.innerHTML=`
           <div style="font-size:15px;color:#ff8c00;margin-bottom:16px;font-weight:bold;">System</div>
           <div style="display:flex;flex-direction:column;gap:8px;font-size:13px;">
-            ${[["Kernel","dat-kernel 1.0.0"],["Shell","dat-shell 1.0"],["CPU","Virtual x86_64"],["RAM","Browser-managed"],["Storage","localStorage"],["Uptime",`${Math.floor(performance.now()/60000)}m ${Math.floor((performance.now()%60000)/1000)}s`]].map(([k,v])=>`<div style="display:flex;justify-content:space-between;padding:8px;background:#1a1a1a;border:1px solid #2a2a2a;"><span style="color:#888;">${k}</span><span style="color:#ddd;">${v}</span></div>`).join("")}
+            ${[["Kernel","temp-kernel 1.0.0"],["Shell","temp-shell 1.0"],["CPU","Virtual x86_64"],["RAM","Browser-managed"],["Storage","localStorage"],["Uptime",`${Math.floor(performance.now()/60000)}m ${Math.floor((performance.now()%60000)/1000)}s`]].map(([k,v])=>`<div style="display:flex;justify-content:space-between;padding:8px;background:#1a1a1a;border:1px solid #2a2a2a;"><span style="color:#888;">${k}</span><span style="color:#ddd;">${v}</span></div>`).join("")}
             <button onclick="if(confirm('Reset all data and log out?')){localStorage.clear();location.reload();}" style="padding:8px;margin-top:8px;background:#3a0000;border:1px solid #660000;color:#ff6666;font-size:13px;">Reset All Data</button>
           </div>`;
       } else if(id==="about"){

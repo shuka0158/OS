@@ -32,7 +32,7 @@ env, whoami, date, uname, neofetch, history, exit
 
 
 ## Usage
-Open https://shuka0158.github.io/OS/
+Open https://shuka0158.github.io/TEMP-OS/
 
 OR:
 
